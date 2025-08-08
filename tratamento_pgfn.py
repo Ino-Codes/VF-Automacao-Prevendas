@@ -2,38 +2,60 @@ import pandas as pd
 import requests
 import io
 import zipfile
+# As importações do Google foram movidas para dentro da função para manter o script principal limpo
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+
+# --- Função de Upload para o Drive (ATUALIZADA) ---
+def upload_para_drive_compartilhado(nome_arquivo_local, nome_arquivo_nuvem, id_drive_compartilhado):
+    """Faz o upload de um arquivo para um DRIVE COMPARTILHADO específico."""
+    try:
+        print(f"  Iniciando upload para o Drive Compartilhado: {nome_arquivo_nuvem}")
+        
+        SCOPES = ['https://www.googleapis.com/auth/drive']
+        CREDS_FILE = './vf-automacoes-67e45a498e41.json' # <-- Coloque o caminho do seu arquivo de credencial
+
+        creds = Credentials.from_service_account_file(CREDS_FILE, scopes=SCOPES)
+        service = build('drive', 'v3', credentials=creds)
+
+        # A pasta pai agora é o próprio Drive Compartilhado
+        file_metadata = {
+            'name': nome_arquivo_nuvem,
+            'parents': [id_drive_compartilhado]
+        }
+        
+        media = MediaFileUpload(nome_arquivo_local, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+        # MUDANÇA CRÍTICA: Adicionados parâmetros para suportar Drives Compartilhados
+        file = service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields='id',
+            supportsAllDrives=True # <-- ESSENCIAL para contas de serviço
+        ).execute()
+
+        print(f"  -> SUCESSO! Arquivo carregado com ID: {file.get('id')}")
+        return True
+    except Exception as e:
+        print(f"  -> ERRO no upload para o Google Drive: {e}")
+        return False
 
 # --- ETAPA 0: CONFIGURAÇÃO ---
 URL_DADOS_PGFN = "https://dadosabertos.pgfn.gov.br/2025_trimestre_02/Dados_abertos_Previdenciario.zip"
 SUBPASTA_DENTRO_DO_ZIP = '' 
-NOMES_ARQUIVOS_CSV = [
-    'arquivo_lai_PREV_1_202506.csv',
-    'arquivo_lai_PREV_2_202506.csv',
-    'arquivo_lai_PREV_3_202506.csv',
-    'arquivo_lai_PREV_4_202506.csv',
-    'arquivo_lai_PREV_5_202506.csv',
-    'arquivo_lai_PREV_6_202506.csv'
-]
+NOMES_ARQUIVOS_CSV = ['arquivo_lai_PREV_1_202506.csv', 'arquivo_lai_PREV_2_202506.csv', 'arquivo_lai_PREV_3_202506.csv', 'arquivo_lai_PREV_4_202506.csv', 'arquivo_lai_PREV_5_202506.csv', 'arquivo_lai_PREV_6_202506.csv']
 UF_DESEJADA = 'RS'
 VALOR_MINIMO_DIVIDA = 100000
 TERMOS_EXCLUIR = ['MUNICIPIO', 'MUNICÍPIO', 'CONTABILIDADE', 'CONTÁBIL', 'CONTABIL', 'CONTADOR', 'CONTADORA', 'CONTADORES', 'FALENCIA', 'FALÊNCIA', 'MASSA FALIDA', 'FALIDA', 'FALIDO', 'FILIAL', 'RECUPERACAO JUDICIAL', 'RECUPERAÇÃO JUDICIAL', 'EM LIQUIDACAO', 'EM LIQUIDAÇÃO']
-COLUNAS_PARA_REMOVER = [
-    'TIPO_PESSOA',
-    'TIPO_DEVEDOR',
-    'UNIDADE_RESPONSAVEL',
-    'NUMERO_INSCRICAO',
-    'TIPO_CREDITO',
-    'DATA_INSCRICAO',
-    'INDICADOR_AJUIZADO'
-]
+COLUNAS_PARA_REMOVER = ['TIPO_PESSOA', 'TIPO_DEVEDOR', 'UNIDADE_RESPONSAVEL', 'NUMERO_INSCRICAO', 'TIPO_CREDITO', 'DATA_INSCRICAO', 'INDICADOR_AJUIZADO']
 
 # --- SCRIPT PRINCIPAL ---
 if __name__ == "__main__":
-    print("--- INICIANDO SCRIPT DE GERAÇÃO DE RELATÓRIOS (DETALHADO E TOTALIZADO) ---")
-    
+    # ... (ETAPA 1 e 2 permanecem as mesmas) ...
     # --- ETAPA 1: EXTRAÇÃO E CONSOLIDAÇÃO DOS DADOS ---
+    print("--- INICIANDO SCRIPT DE GERAÇÃO DE RELATÓRIOS ---")
     try:
-        # ... (O código da Etapa 1 permanece o mesmo) ...
         print(f"\n[ETAPA 1/3] Baixando e consolidando dados...")
         response = requests.get(URL_DADOS_PGFN, stream=True)
         response.raise_for_status()
@@ -53,7 +75,6 @@ if __name__ == "__main__":
 
     # --- ETAPA 2: TRATAMENTO DE DADOS ---
     try:
-        # ... (O código da Etapa 2 permanece o mesmo) ...
         print(f"\n[ETAPA 2/3] Iniciando tratamento e filtragem dos dados...")
         registros_antes = len(df)
         df = df[df['CPF_CNPJ'].str.contains('/0001-', na=False)]
@@ -65,39 +86,37 @@ if __name__ == "__main__":
         del df 
         print(f"Tratamento concluído. De {registros_antes} registros, restaram {len(df_tratado)} débitos individuais.")
     except Exception as e:
-        print(f"ERRO CRÍTICO na Etapa 2: Ocorreu um erro durante o tratamento dos dados. Verifique os nomes das colunas.")
-        print(f"Detalhe do erro: {e}")
+        print(f"ERRO CRÍTICO na Etapa 2: {e}")
         exit()
 
-    # --- ETAPA 3: GERAR E SALVAR RELATÓRIOS ---
-    print(f"\n[ETAPA 3/3] Gerando e salvando os relatórios finais...")
-    
-    # 1. Salvar o relatório DETALHADO (igual ao anterior)
-    try:
-        nome_arquivo_detalhado = "relatorio_detalhado_previdenciario.xlsx"
-        df_tratado.to_excel(nome_arquivo_detalhado, index=False)
-        print(f"-> SUCESSO! Relatório detalhado salvo como '{nome_arquivo_detalhado}'")
-    except Exception as e:
-        print(f"-> ERRO ao salvar o relatório detalhado: {e}")
+    # --- ETAPA 3: GERAR, SALVAR E FAZER UPLOAD DOS RELATÓRIOS ---
+    print(f"\n[ETAPA 3/3] Gerando e salvando os relatórios finais no Drive...")
 
-    # 2. Gerar e salvar o relatório TOTALIZADO
+    ID_DRIVE_COMPARTILHADO = "0AAt476eDPRSmUk9PVA" 
+
+    # 1. Relatório DETALHADO
+    nome_arquivo_detalhado = "relatorio_detalhado_previdenciario.xlsx"
+    df_tratado.to_excel(nome_arquivo_detalhado, index=False)
+    print(f"-> Relatório detalhado salvo localmente como '{nome_arquivo_detalhado}'")
+    upload_para_drive_compartilhado(nome_arquivo_detalhado, nome_arquivo_detalhado, ID_DRIVE_COMPARTILHADO)
+
+    # 2. Relatório TOTALIZADO
     try:
         print("Agrupando e somando dívidas por CNPJ...")
         
-        # Agrupa pelo CNPJ e define quais operações fazer em cada coluna
+        # CORREÇÃO: Substituído o '...' pela lógica de agregação correta
         df_totalizado = df_tratado.groupby('CPF_CNPJ').agg(
-            NOME_DEVEDOR=('NOME_DEVEDOR', 'first'), # Pega o primeiro nome (serão todos iguais)
-            UF_DEVEDOR=('UF_DEVEDOR', 'first'),     # Pega a primeira UF (serão todas iguais)
-            VALOR_TOTAL_DIVIDA=('VALOR_CONSOLIDADO', 'sum') # SOMA os valores
-        ).reset_index() # Transforma o agrupamento de volta em um DataFrame padrão
+            NOME_DEVEDOR=('NOME_DEVEDOR', 'first'),
+            UF_DEVEDOR=('UF_DEVEDOR', 'first'),
+            VALOR_TOTAL_DIVIDA=('VALOR_CONSOLIDADO', 'sum')
+        ).reset_index()
 
-        # Arredonda o valor total para 2 casas decimais
         df_totalizado['VALOR_TOTAL_DIVIDA'] = df_totalizado['VALOR_TOTAL_DIVIDA'].round(2)
 
-        # Salva o novo DataFrame totalizado
         nome_arquivo_totalizado = "relatorio_total_previdenciario.xlsx"
         df_totalizado.to_excel(nome_arquivo_totalizado, index=False)
-        print(f"-> SUCESSO! Relatório totalizado salvo como '{nome_arquivo_totalizado}'")
+        print(f"-> Relatório totalizado salvo localmente como '{nome_arquivo_totalizado}'")
+        upload_para_drive_compartilhado(nome_arquivo_totalizado, nome_arquivo_totalizado, ID_DRIVE_COMPARTILHADO)
     except Exception as e:
         print(f"-> ERRO ao gerar ou salvar o relatório totalizado: {e}")
         
