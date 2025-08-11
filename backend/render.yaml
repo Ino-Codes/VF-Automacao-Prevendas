@@ -1,0 +1,57 @@
+services:
+  # 1. O Banco de Dados PostgreSQL
+  - type: psql
+    name: postgresql-pgfn
+    databaseName: dados_pgfn
+    plan: free # Usa o plano gratuito para o banco de dados
+
+  # 2. O "Carteiro" (Fila de Tarefas) Redis
+  - type: redis
+    name: redis-pgfn
+    plan: free # Usa o plano gratuito para o Redis
+
+  # 3. O Servidor Web Flask (API)
+  - type: web
+    name: api-pgfn
+    env: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn app:app"
+    envVars:
+      - key: DATABASE_URL # A Render injeta a URL do banco de dados automaticamente
+        fromService:
+          type: psql
+          name: postgresql-pgfn
+          property: connectionString
+      - key: CELERY_BROKER_URL # A Render injeta a URL do Redis automaticamente
+        fromService:
+          type: redis
+          name: redis-pgfn
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: redis-pgfn
+          property: connectionString
+
+  # 4. O Worker do Celery
+  - type: worker
+    name: worker-pgfn
+    env: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "celery -A tasks.celery worker -P eventlet --loglevel=info"
+    envVars:
+      - key: DATABASE_URL
+        fromService:
+          type: psql
+          name: postgresql-pgfn
+          property: connectionString
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: redis
+          name: redis-pgfn
+          property: connectionString
+      - key: CELERY_RESULT_BACKEND
+        fromService:
+          type: redis
+          name: redis-pgfn
+          property: connectionString
