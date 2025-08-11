@@ -1,129 +1,104 @@
 import pandas as pd
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait, Select
-from selenium.webdriver.support import expected_conditions as EC
-import time
-import datetime
+import glob
+import warnings
+
+# Ignora o aviso de estilo dos arquivos Excel da PGFN
+warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
 
 # --- ETAPA 0: CONFIGURAÇÃO ---
-ARQUIVO_ENTRADA = "./relatorio_total_previdenciario.xlsx"
-URL_PAINEL_PARCELAMENTOS = "https://dw.pgfn.fazenda.gov.br/dwsigpgfn/servlet/mstrWeb?evt=3140&documentID=6C86F338847E71AE8ACC292A5E08B3B43&..."
 
-# --- SCRIPT PRINCIPAL ---
+ARQUIVO_LEADS = "relatorio_total_previdenciario.xlsx"
+PADRAO_ARQUIVOS_PARCELAMENTO = "painel_parcelamento_*.xlsx"
+ARQUIVO_FINAL = "relatorio_final_com_negociacoes_consolidadas.xlsx"
+
+# Lista com as colunas que desejamos consolidar
+COLUNAS_PARA_CONSOLIDAR = [
+    "Mês/Ano do Requerimento da Negociação",
+    "Tipo de Negociação",
+    "Modalidade da Negociação",
+    "Situação da Negociação",
+    "Qtde de Parcelas Concedidas",
+    "Qtde de Parcelas em Atraso",
+    "Valor Consolidado",
+    "Valor do Principal",
+    "Valor da Multa",
+    "Valor dos Juros",
+    "Valor do Encargo Legal"
+]
+
+# --- SCRIPT PRINCIPAL DE CRUZAMENTO DE DADOS ---
 if __name__ == "__main__":
-    print("--- INICIANDO CRUZAMENTO COM O PAINEL DE PARCELAMENTOS ---")
-    
-    # --- ETAPA 1: Carregar a lista de CNPJs ---
+    print("--- INICIANDO CRUZAMENTO DE DADOS COM MÚLTIPLAS PLANILHAS ---")
+
+    # --- ETAPA 1 e 2 (SEM ALTERAÇÕES) ---
     try:
-        df_principal = pd.read_excel(ARQUIVO_ENTRADA)
-        print(f"Arquivo '{ARQUIVO_ENTRADA}' carregado. {len(df_principal)} CNPJs para consultar.")
-    except FileNotFoundError:
-        print(f"ERRO: O arquivo '{ARQUIVO_ENTRADA}' não foi encontrado.")
+        print(f"Lendo o arquivo de leads: {ARQUIVO_LEADS}")
+        df_leads = pd.read_excel(ARQUIVO_LEADS)
+        print(f"Arquivo de leads carregado com {len(df_leads)} empresas.")
+
+        print(f"Procurando por arquivos de parcelamento com o padrão: '{PADRAO_ARQUIVOS_PARCELAMENTO}'")
+        lista_nomes_arquivos = glob.glob(PADRAO_ARQUIVOS_PARCELAMENTO)
+        
+        if not lista_nomes_arquivos:
+            raise FileNotFoundError(f"Nenhum arquivo de parcelamento encontrado com o padrão '{PADRAO_ARQUIVOS_PARCELAMENTO}'.")
+            
+        print(f"Encontrados {len(lista_nomes_arquivos)} arquivos de parcelamento.")
+        
+        lista_dataframes_parcelamento = []
+        for arquivo in lista_nomes_arquivos:
+            print(f"  Lendo o arquivo: {arquivo}...")
+            df_temp = pd.read_excel(arquivo, header=2)
+            lista_dataframes_parcelamento.append(df_temp)
+            
+        print("Consolidando todos os dados de parcelamento...")
+        df_parcelamentos = pd.concat(lista_dataframes_parcelamento, ignore_index=True)
+        print(f"Base de parcelamentos consolidada com {len(df_parcelamentos)} registros.")
+    except Exception as e:
+        print(f"\nERRO ao ler os arquivos: {e}")
         exit()
 
-    # --- ETAPA 2: Iniciar o Selenium ---
-    print("Iniciando o navegador...")
-    options = webdriver.ChromeOptions()
-    options.add_argument("start-maximized")
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    driver = webdriver.Chrome(options=options)
-    
-    resultados_parcelamentos = []
-
+    # --- ETAPA 3: Preparar e agregar dados de parcelamento (LÓGICA CORRIGIDA) ---
     try:
-        # --- ETAPA 3: Acessar o painel e aplicar filtros iniciais ---
-        print(f"Acessando o painel de parcelamentos...")
-        driver.get(URL_PAINEL_PARCELAMENTOS)
+        print("Preparando e agregando dados de parcelamento por CNPJ...")
+        NOME_DA_COLUNA_CNPJ_NO_ARQUIVO = "CPF/CNPJ do Optante"
+        df_parcelamentos = df_parcelamentos.rename(columns={NOME_DA_COLUNA_CNPJ_NO_ARQUIVO: 'CPF_CNPJ'})
         
-        print("Aguardando carregamento inicial do painel (pode levar um tempo)...")
-        time.sleep(25) # Espera inicial mais longa para garantir que todos os scripts do painel carreguem
+        df_leads['CPF_CNPJ'] = df_leads['CPF_CNPJ'].astype(str)
+        df_parcelamentos['CPF_CNPJ'] = df_parcelamentos['CPF_CNPJ'].astype(str)
         
-        wait = WebDriverWait(driver, 30)
+        # Passo 1: Criar o dicionário de agregação apenas para as colunas de texto
+        agg_funcs_texto = {col: lambda x: ' | '.join(x.astype(str).unique()) for col in COLUNAS_PARA_CONSOLIDAR}
+        
+        # Passo 2: Executar a agregação do texto
+        df_agregado_texto = df_parcelamentos.groupby('CPF_CNPJ').agg(agg_funcs_texto).reset_index()
+        
+        # Passo 3: Calcular a contagem de negociações separadamente
+        df_contagem = df_parcelamentos.groupby('CPF_CNPJ').size().reset_index(name='Qtde. Negociações')
+        
+        # Passo 4: Juntar os dois resultados (texto agregado e contagem)
+        df_parcelamentos_agregado = pd.merge(df_agregado_texto, df_contagem, on='CPF_CNPJ')
+        
+        print("Dados de parcelamento agregados com sucesso.")
 
-        # 1. Selecionar o ESTADO (apenas uma vez)
-        try:
-            print("Aplicando filtro de Estado (UF)...")
-            # ** VOCÊ PRECISA ENCONTRAR O SELETOR CORRETO E SUBSTITUIR ABAIXO **
-            seletor_uf_dropdown = '//*[@id="mstr518"]'
-            uf_dropdown_element = wait.until(EC.presence_of_element_located((By.XPATH, seletor_uf_dropdown)))
-            select_uf = Select(uf_dropdown_element)
-            select_uf.select_by_visible_text("RIO GRANDE DO SUL") # Ou select_by_value("RS")
-            time.sleep(2) # Pausa após seleção para permitir atualização
-        except Exception as e:
-            print(f"ERRO: Não foi possível aplicar o filtro de Estado. Verifique o seletor. Erro: {e}")
-            raise # Levanta o erro para parar a execução, pois o filtro é essencial
+    except Exception as e:
+        print(f"\nERRO na etapa de preparação dos dados: {e}")
+        exit()
 
-        # 2. Selecionar o ANO (apenas uma vez)
-        try:
-            print("Aplicando filtro de Ano...")
-            ano_atual = str(datetime.datetime.now().year)
-            # ** VOCÊ PRECISA ENCONTRAR O SELETOR CORRETO E SUBSTITUIR ABAIXO **
-            seletor_ano_dropdown = '//*[@id="mstr504"]'
-            ano_dropdown_element = wait.until(EC.presence_of_element_located((By.XPATH, seletor_ano_dropdown)))
-            select_ano = Select(ano_dropdown_element)
-            select_ano.select_by_value(ano_atual) # Seleciona o ano atual
-            print(f"Filtros de Estado e Ano ({ano_atual}) aplicados com sucesso.")
-            time.sleep(5) # Pausa maior após os filtros iniciais
-        except Exception as e:
-            print(f"ERRO: Não foi possível aplicar o filtro de Ano. Verifique o seletor. Erro: {e}")
-            raise
+    # --- ETAPA 4: Cruzar as duas bases de dados ---
+    print("Realizando o cruzamento das bases de dados pelo CNPJ...")
+    df_final = pd.merge(df_leads, df_parcelamentos_agregado, on='CPF_CNPJ', how='left')
+    
+    # Adiciona a coluna "POSSUI_PARCELAMENTO"
+    df_final['POSSUI_PARCELAMENTO'] = df_final['Qtde. Negociações'].notna().map({True: 'Sim', False: 'Não'})
+    
+    print("Cruzamento de dados concluído.")
 
-        # --- ETAPA 4: Iterar e consultar cada CNPJ ---
-        for index, row in df_principal.iterrows():
-            cnpj = row['CPF_CNPJ']
-            # Remove formatação do CNPJ para inserção no campo, se necessário
-            cnpj_sem_formatacao = cnpj.replace('.', '').replace('/', '').replace('-', '')
-            print(f"\nConsultando CNPJ {index + 1}/{len(df_principal)}: {cnpj}")
-
-            try:
-                # 1. Encontrar e preencher o campo do CNPJ
-                # ** VOCÊ PRECISA ENCONTRAR O SELETOR CORRETO E SUBSTITUIR ABAIXO **
-                seletor_campo_cnpj = '//*[@id="mstr560"]/div[1]/div'
-                campo_cnpj = wait.until(EC.element_to_be_clickable((By.XPATH, seletor_campo_cnpj)))
-                
-                campo_cnpj.clear()
-                campo_cnpj.send_keys(cnpj_sem_formatacao)
-                
-                # 2. ESPERA INTELIGENTE: Aguarda a atualização automática
-                print("  Aguardando atualização em tempo real...")
-                # ** VOCÊ PRECISA ENCONTRAR O SELETOR DO INDICADOR DE CARREGAMENTO E SUBSTITUIR ABAIXO **
-                seletor_do_spinner = '/*[@id="waitBox"]/div[1]/div[3]'
-                # Espera o spinner desaparecer (se torna invisível)
-                wait.until(EC.invisibility_of_element_located((By.XPATH, seletor_do_spinner)))
-                time.sleep(0.5) # Pequena pausa para garantir a renderização final
-
-                # 3. Extrair os dados do resultado
-                # ** VOCÊ PRECISA ENCONTRAR O SELETOR DA ÁREA DE RESULTADO E SUBSTITUIR ABAIXO **
-                seletor_resultado = '//*[@id="mstr492"]/div[1]/div[1]'
-                area_resultado = wait.until(EC.presence_of_element_located((By.XPATH, seletor_resultado)))
-                
-                texto_resultado = area_resultado.text.upper()
-                if "ATIVO" in texto_resultado:
-                    status_parcelamento = "Possui Parcelamento Ativo"
-                elif "NÃO HÁ DADOS" in texto_resultado or "NENHUM DADO" in texto_resultado:
-                    status_parcelamento = "Sem Parcelamento"
-                else:
-                    # Se não encontrar nenhuma das mensagens, pode extrair o texto para análise posterior
-                    status_parcelamento = f"Status Desconhecido ({texto_resultado[:50]})"
-                
-                print(f"  -> Status: {status_parcelamento}")
-                resultados_parcelamentos.append({'CPF_CNPJ': cnpj, 'STATUS_PARCELAMENTO': status_parcelamento})
-
-            except Exception as e_inner:
-                print(f"  -> ERRO ao consultar o CNPJ {cnpj}: {e_inner}")
-                resultados_parcelamentos.append({'CPF_CNPJ': cnpj, 'STATUS_PARCELAMENTO': 'Erro na Consulta'})
-
-    finally:
-        print("\nFechando o navegador...")
-        driver.quit()
-
-    # --- ETAPA 5: Unir os dados e salvar o relatório final ---
-    print("\nUnindo dados de parcelamento com a planilha original...")
-    df_resultados = pd.DataFrame(resultados_parcelamentos)
-    df_final = pd.merge(df_principal, df_resultados, on='CPF_CNPJ', how='left')
-    nome_arquivo_final = "relatorio_final_com_parcelamentos.xlsx"
-    df_final.to_excel(nome_arquivo_final, index=False)
-
-    print(f"\n--- PROCESSO CONCLUÍDO! ---")
-    print(f"Relatório final salvo como '{nome_arquivo_final}'")
+    # --- ETAPA 5: Salvar o relatório final enriquecido ---
+    try:
+        df_final.to_excel(ARQUIVO_FINAL, index=False)
+        print(f"\n--- PROCESSO CONCLUÍDO! ---")
+        print(f"Relatório final salvo como '{ARQUIVO_FINAL}'")
+        print("\nResumo do Resultado:")
+        print(df_final['POSSUI_PARCELAMENTO'].value_counts())
+    except Exception as e:
+        print(f"ERRO ao salvar o arquivo final: {e}")
