@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
-import UploadForm from "./components/UploadForm";
-import ResultsDisplay from "./components/ResultsDisplay";
+import UploadForm from "./components/UploadForm.jsx";
+import ResultsDisplay from "./components/ResultsDisplay.jsx";
 import "./App.css";
 
 console.log("VITE_API_URL DENTRO DO CÓDIGO:", import.meta.env.VITE_API_URL);
