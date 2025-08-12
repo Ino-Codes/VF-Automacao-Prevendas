@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import axios from "axios";
-import UploadForm from "./components/UploadForm.jsx";
-import ResultsDisplay from "./components/ResultsDisplay.jsx";
+import { UploadForm } from "./components/UploadForm";
+import { ResultsDisplay } from "./components/ResultsDisplay";
 import "./App.css";
 
 console.log("VITE_API_URL DENTRO DO CÓDIGO:", import.meta.env.VITE_API_URL);
@@ -9,7 +9,7 @@ console.log("VITE_API_URL DENTRO DO CÓDIGO:", import.meta.env.VITE_API_URL);
 // Garanta que esta é a linha 8 (ou a linha que define API_URL)
 const API_URL = import.meta.env.VITE_API_URL;
 
-function App() {
+export function App() {
   const [jobId, setJobId] = useState(null);
   const [jobStatus, setJobStatus] = useState("idle"); // idle, processing, completed, error
   const [results, setResults] = useState(null);
@@ -122,5 +122,3 @@ function App() {
     </div>
   );
 }
-
-export default App;

@@ -1,7 +1,7 @@
 import React from "react";
 import * as XLSX from "xlsx"; // Importa a biblioteca para manipulação de Excel
 
-function ResultsDisplay({ data }) {
+export function ResultsDisplay({ data }) {
   const { com_parcelamento, sem_parcelamento } = data;
 
   const handleDownload = () => {
@@ -64,5 +64,3 @@ function ResultsDisplay({ data }) {
     </div>
   );
 }
-
-export default ResultsDisplay;

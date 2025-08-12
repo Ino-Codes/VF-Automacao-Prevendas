@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-function UploadForm({ onSubmit }) {
+export function UploadForm({ onSubmit }) {
   const [valorMinimo, setValorMinimo] = useState("100000");
   const [file, setFile] = useState(null);
   const [error, setError] = useState("");
@@ -43,5 +43,3 @@ function UploadForm({ onSubmit }) {
     </form>
   );
 }
-
-export default UploadForm;
