@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Análise de Devedores PGFN</title>
+    <style>
+      :root {
+        font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+        line-height: 1.5;
+        font-weight: 400;
+        color-scheme: light dark;
+        color: rgba(255, 255, 255, 0.87);
+        background-color: #242424;
+        text-align: center;
+      }
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 2rem;
+      }
+      .upload-form,
+      .status-box {
+        background-color: #2f2f2f;
+        padding: 2rem;
+        border-radius: 8px;
+        max-width: 600px;
+        margin: auto;
+      }
+      .form-group {
+        margin-bottom: 1.5rem;
+        text-align: left;
+      }
+      .form-group label {
+        display: block;
+        margin-bottom: 0.5rem;
+      }
+      .form-group input {
+        width: 100%;
+        padding: 0.75rem;
+        border-radius: 4px;
+        border: 1px solid #555;
+        background-color: #3f3f3f;
+        color: #fff;
+        box-sizing: border-box;
+      }
+      button {
+        background-color: #646cff;
+        color: white;
+        padding: 0.8rem 1.5rem;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 1em;
+        font-weight: 500;
+        transition: background-color 0.25s;
+      }
+      button:hover {
+        background-color: #535bf2;
+      }
+      .loader {
+        border: 4px solid #f3f3f3;
+        border-top: 4px solid #646cff;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        animation: spin 1s linear infinite;
+        margin: 1rem auto;
+      }
+      @keyframes spin {
+        0% {
+          transform: rotate(0deg);
+        }
+        100% {
+          transform: rotate(360deg);
+        }
+      }
+      .table-container {
+        overflow-x: auto;
+        background-color: #2f2f2f;
+        padding: 1rem;
+        border-radius: 8px;
+        margin-top: 2rem;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        text-align: left;
+      }
+      th,
+      td {
+        padding: 0.8rem;
+        border-bottom: 1px solid #444;
+      }
+      th {
+        background-color: #3a3a3a;
+      }
+      .hidden {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>Análise de Devedores PGFN</h1>
+        <p>
+          Faça o upload dos dados para iniciar a análise e cruzamento de
+          informações.
+        </p>
+      </header>
+
+      <form id="upload-form" class="upload-form">
+        <div class="form-group">
+          <label for="valor-minimo">Valor Mínimo da Dívida (R$)</label>
+          <input
+            id="valor-minimo"
+            type="number"
+            value="100000"
+            placeholder="Ex: 100000"
+          />
+        </div>
+        <div class="form-group">
+          <label for="file-input">Arquivo de Parcelamentos (.xlsx)</label>
+          <input id="file-input" type="file" accept=".xlsx" required />
+        </div>
+        <button type="submit" id="submit-button">Iniciar Processamento</button>
+      </form>
+
+      <div id="status-box" class="status-box hidden">
+        <h2 id="status-title">Processando...</h2>
+        <p id="status-message">
+          Sua solicitação está sendo processada no servidor. Por favor, aguarde.
+        </p>
+        <div id="status-loader" class="loader"></div>
+      </div>
+
+      <div id="results-container" class="hidden">
+        <h2>Resultados da Análise</h2>
+        <div id="com-parcelamento-container" class="table-container">
+          <h3>Leads COM Parcelamento Ativo</h3>
+          <table id="com-parcelamento-table">
+            <thead></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div id="sem-parcelamento-container" class="table-container">
+          <h3>Leads SEM Parcelamento Identificado</h3>
+          <table id="sem-parcelamento-table">
+            <thead></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+    <script>
+      // URL do seu backend no Render
+      const API_URL = "https://vf-automacao-backend.onrender.com";
+
+      // Seleciona os elementos da página
+      const uploadForm = document.getElementById("upload-form");
+      const statusBox = document.getElementById("status-box");
+      const resultsContainer = document.getElementById("results-container");
+      const statusTitle = document.getElementById("status-title");
+      const statusMessage = document.getElementById("status-message");
+      const statusLoader = document.getElementById("status-loader");
+
+      // Função para lidar com o envio do formulário
+      uploadForm.addEventListener("submit", async (event) => {
+        event.preventDefault(); // Impede o recarregamento da página
+
+        const valorMinimo = document.getElementById("valor-minimo").value;
+        const fileInput = document.getElementById("file-input");
+
+        if (!fileInput.files[0]) {
+          alert("Por favor, selecione um arquivo.");
+          return;
+        }
+
+        // Mostra a caixa de status e esconde o formulário
+        uploadForm.classList.add("hidden");
+        statusBox.classList.remove("hidden");
+        statusTitle.innerText = "Processando...";
+        statusMessage.innerText =
+          "Sua solicitação está sendo processada no servidor. Por favor, aguarde.";
+        statusLoader.classList.remove("hidden");
+
+        const formData = new FormData();
+        formData.append("valor_minimo", valorMinimo);
+        formData.append("file", fileInput.files[0]);
+
+        try {
+          // Envia a requisição para iniciar o processamento
+          const response = await fetch(`${API_URL}/processar`, {
+            method: "POST",
+            body: formData,
+          });
+
+          if (!response.ok)
+            throw new Error(
+              `Erro na requisição inicial: ${response.statusText}`
+            );
+
+          const data = await response.json();
+          const jobId = data.job_id;
+
+          // Inicia a verificação de status a cada 5 segundos
+          const intervalId = setInterval(async () => {
+            try {
+              const statusResponse = await fetch(`${API_URL}/status/${jobId}`);
+              const statusData = await statusResponse.json();
+
+              if (statusData.status === "concluido") {
+                clearInterval(intervalId);
+                const resultResponse = await fetch(
+                  `${API_URL}/resultado/${jobId}`
+                );
+                const resultData = await resultResponse.json();
+                renderResults(resultData.resultado);
+              } else if (statusData.status === "erro") {
+                throw new Error(
+                  "Ocorreu um erro no processamento no servidor."
+                );
+              }
+            } catch (err) {
+              clearInterval(intervalId);
+              showError(err.message);
+            }
+          }, 5000);
+        } catch (err) {
+          showError(err.message);
+        }
+      });
+
+      // Função para renderizar os resultados nas tabelas
+      function renderResults(results) {
+        statusBox.classList.add("hidden");
+        resultsContainer.classList.remove("hidden");
+        renderTable("com-parcelamento-table", results.com_parcelamento);
+        renderTable("sem-parcelamento-table", results.sem_parcelamento);
+      }
+
+      function renderTable(tableId, data) {
+        const table = document
+          .getElementById(tableId)
+          .getElementsByTagName("tbody")[0];
+        const tableHeader = document
+          .getElementById(tableId)
+          .getElementsByTagName("thead")[0];
+        table.innerHTML = ""; // Limpa a tabela
+        tableHeader.innerHTML = ""; // Limpa o cabeçalho
+
+        if (data.length === 0) {
+          table.innerHTML =
+            '<tr><td colspan="100%">Nenhum registro encontrado.</td></tr>';
+          return;
+        }
+
+        // Cria o cabeçalho
+        const headers = Object.keys(data[0]);
+        let headerRow = "<tr>";
+        headers.forEach((header) => {
+          headerRow += `<th>${header}</th>`;
+        });
+        headerRow += "</tr>";
+        tableHeader.innerHTML = headerRow;
+
+        // Cria as linhas de dados
+        data.forEach((rowData) => {
+          let row = "<tr>";
+          headers.forEach((header) => {
+            row += `<td>${rowData[header]}</td>`;
+          });
+          row += "</tr>";
+          table.innerHTML += row;
+        });
+      }
+
+      // Função para mostrar erros
+      function showError(message) {
+        statusTitle.innerText = "Erro!";
+        statusMessage.innerText = message;
+        statusLoader.classList.add("hidden");
+      }
+    </script>
+  </body>
+</html>
