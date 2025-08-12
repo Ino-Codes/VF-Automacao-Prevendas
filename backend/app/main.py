@@ -1,4 +1,5 @@
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, BackgroundTasks
+# NOVA LINHA: Importa o middleware de CORS
 from fastapi.middleware.cors import CORSMiddleware
 import uuid
 from typing import Dict
@@ -11,17 +12,23 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Configuração do CORS para permitir que o frontend (rodando em outra porta/domínio) acesse a API
+# --- BLOCO DE CÓDIGO NOVO E ESSENCIAL ---
+# Configuração do CORS para permitir que o frontend acesse a API
+origins = [
+    "https://vf-automacao-prevendas.vercel.app", # A URL do seu frontend
+    "http://localhost:5173", # Para testes locais no futuro
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Em produção, restrinja para o domínio do seu frontend
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# --- FIM DO BLOCO NOVO ---
 
 # "Banco de dados" em memória para armazenar o status e o resultado das tarefas
-# Em uma aplicação de produção maior, considere usar Redis ou um banco de dados relacional
 jobs: Dict[str, Dict] = {}
 
 
@@ -52,10 +59,7 @@ async def iniciar_processamento(
     job_id = str(uuid.uuid4())
     file_bytes = await file.read()
 
-    # Armazena o job com status inicial
     jobs[job_id] = {"status": "processando"}
-
-    # Adiciona a tarefa pesada para ser executada em background
     background_tasks.add_task(run_processing_task, job_id, valor_minimo, file_bytes)
 
     return {"job_id": job_id, "message": "Processamento iniciado."}
@@ -69,7 +73,7 @@ async def get_status(job_id: str):
     job = jobs.get(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job não encontrado.")
-    
+
     return {"job_id": job_id, "status": job["status"]}
 
 
@@ -83,5 +87,5 @@ async def get_resultado(job_id: str):
         raise HTTPException(status_code=404, detail="Job não encontrado.")
     if job["status"] != "concluido":
         raise HTTPException(status_code=400, detail=f"Job ainda não concluído. Status atual: {job['status']}")
-    
+
     return {"job_id": job_id, "resultado": job["result"]}
